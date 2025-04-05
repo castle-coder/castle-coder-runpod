@@ -1,0 +1,18 @@
+{
+    "name": "runpod-websocket",
+    "description": "LLM WebSocket server",
+    "version": "1.0.0",
+    "runtime": "python:3.10",
+    "ports": {
+      "8765": "TCP"
+    },
+    "env": {
+      "MODEL_ID": "google/gemma-2-9b-it",
+      "HF_TOKEN": ""
+    },
+    "gpu": {
+      "required": true,
+      "vram": "24GB"
+    }
+  }
+  
