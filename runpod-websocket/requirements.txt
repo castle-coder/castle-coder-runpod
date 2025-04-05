@@ -1,5 +1,5 @@
-runpod==1.2.0
-torch==2.0.1
-transformers==4.30.2
-vllm==0.1.4
-websockets==11.0.3
+runpod
+websocket-server
+asyncio
+transformers
+torch
