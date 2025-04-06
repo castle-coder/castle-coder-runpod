@@ -21,6 +21,8 @@ def generate_streaming_response(prompt, client, server):
     ]
     text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     inputs = tokenizer([text], return_tensors="pt").to(model.device)
+    
+    print(f"💬 Generating response for prompt: {prompt}")
 
     # 스트리밍 객체 생성
     streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
@@ -51,6 +53,7 @@ def on_message(client, server, message):
     if message.strip().lower() == "shutdown":
         print("⚠️ 'shutdown' command received, but ignored.")
         return
+
 
     # 생성 시작
     threading.Thread(target=generate_streaming_response, args=(message, client, server)).start()
@@ -96,3 +99,5 @@ if __name__ == '__main__':
         'handler': handler,
         "return_aggregate_stream": True,
     })
+
+
