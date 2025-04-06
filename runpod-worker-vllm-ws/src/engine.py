@@ -105,31 +105,33 @@ class vLLMEngine:
             batch["usage"] = {"input": n_input_tokens, "output": token_counters["total"]}
             yield batch
 
-    # src/engine.py에 다음 메소드 추가
-    async def generate_stream(self, prompt):
-        """
-        프롬프트에 대한 응답을 스트리밍 방식으로 생성합니다.
+
+
+    # # src/engine.py에 다음 메소드 추가
+    # async def generate_stream(self, prompt):
+    #     """
+    #     프롬프트에 대한 응답을 스트리밍 방식으로 생성합니다.
         
-        Args:
-            prompt (str): 모델에 전달할 텍스트 프롬프트
+    #     Args:
+    #         prompt (str): 모델에 전달할 텍스트 프롬프트
             
-        Returns:
-            async generator: 생성된 토큰을 하나씩 반환하는 비동기 제너레이터
-        """
-        # vLLM 모델을 사용하여 텍스트 생성
-        # 여기서는 handler.py에 구현된 로직을 활용해야 합니다
+    #     Returns:
+    #         async generator: 생성된 토큰을 하나씩 반환하는 비동기 제너레이터
+    #     """
+    #     # vLLM 모델을 사용하여 텍스트 생성
+    #     # 여기서는 handler.py에 구현된 로직을 활용해야 합니다
         
-        # 예시 구현:
-        generation_args = {
-            "prompt": prompt,
-            "max_tokens": 1024,
-            "temperature": 0.7,
-            "stream": True
-        }
+    #     # 예시 구현:
+    #     generation_args = {
+    #         "prompt": prompt,
+    #         "max_tokens": 1024,
+    #         "temperature": 0.7,
+    #         "stream": True
+    #     }
         
-        response = self.generate(generation_args)
-        for token in response:
-            yield token
+    #     response = self.generate(generation_args)
+    #     for token in response:
+    #         yield token
 
 
     def _initialize_llm(self):

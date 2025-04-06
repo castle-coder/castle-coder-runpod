@@ -1,70 +1,119 @@
 import runpod
 import os
 import asyncio
-import json
-from engine import vLLMEngine
-from websocket_server import WebSocketServer
+from src.engine import vLLMEngine
+from src.websocket_server import WebSocketServer
+from src.utils import JobInput, random_uuid
 
-engine =None
-websocket_server = None
-
-async def handler(job):  # 비동기 함수로 변경
-    global engine, websocket_server
+websocket_port = 8765
+exposed_port_env = f"TCP_PORT_{websocket_port}"
+pod_ip = os.environ.get('RUNPOD_PUBLIC_IP', 'localhost')
+pod_port = os.environ.get('RUNPOD_TCP_PORT_8765', '8765')
     
-    # 환경 변수 처리
-    websocket_port = 8765
-    exposed_port_env = f"TCP_PORT_{websocket_port}"
-    pod_ip = os.environ.get('RUNPOD_PUBLIC_IP', 'localhost')
-    pod_port = os.environ.get('RUNPOD_TCP_PORT_8765', '8765')
-    
-    if not pod_port:
-        return {"error": f"{exposed_port_env} 환경 변수 없음"}
 
-    # 진행 상태 업데이트
-    runpod.serverless.progress_update(job, {  # job 객체 사용
-        "status": "엔진 초기화 중",
-        "ip": pod_ip,
-        "port": pod_port
-    })
-
-    # vLLM 엔진 초기화
-    if not engine:
-        try:
-            engine = vLLMEngine()
-            runpod.serverless.progress_update(job, {"status": "엔진 준비 완료"})
-        except Exception as e:
-            return {"error": f"엔진 오류: {str(e)}"}
-
-    # WebSocket 서버 설정
-    if not websocket_server:
-        websocket_server = WebSocketServer(
-            engine, 
-            host="0.0.0.0", 
+# 전역 변수 초기화
+engine = vLLMEngine()
+websocket_server = WebSocketServer(
+            engine,
+            host="0.0.0.0",
             port=8765
         )
 
-    # 비동기 서버 실행
-    server_task = asyncio.create_task(websocket_server.start())
-    
-    # 백그라운드 작업 모니터링
-    while not server_task.done():
-        await asyncio.sleep(1)
-        runpod.serverless.progress_update(job, {
-            "status": "요청 대기 중",
-            "connections": len(websocket_server.active_connections),
-            "ip": pod_ip,
-            "port": pod_port
-        })
 
-    return {"status": "서버 종료"}
-
-if __name__ == "__main__":
-    runpod.serverless.start({
-        "handler": handler,
-        "concurrency_modes": {
-            "max_workers": 1  # 단일 워커 설정
-        }
+async def handler(job):
+    # 연결 정보 공유
+    asyncio.create_task(websocket_server.start())
+    runpod.serverless.progress_update(job, {
+        "status": "시작",
+        "ip": pod_ip,
+        "port": pod_port,
+        "version":"테스트2"
     })
+
+    await asyncio.sleep(2)  # 잠시 대기
+
+    # 비동기 생성기 시작
+    try:
+        await websocket_server.start_generation(job)
+        await websocket_server.generation_complete.wait()
+        return {"status": "처리 완료"}
+    except Exception as e:
+        return {"error": str(e)}
+    
+
+runpod.serverless.start(
+    {
+        "handler": handler,
+        "return_aggregate_stream": True
+    }
+)
+
+
+
+# import runpod
+# import os
+# import asyncio
+# import json
+# from engine import vLLMEngine, OpenAIvLLMEngine
+# from websocket_server import WebSocketServer
+
+# engine = vLLMEngine()
+# OpenAIvLLMEngine = OpenAIvLLMEngine(engine)
+# websocket_server = None
+
+# async def handler(job):  # 비동기 함수로 변경
+    
+#     # 환경 변수 처리
+#     websocket_port = 8765
+#     exposed_port_env = f"TCP_PORT_{websocket_port}"
+#     pod_ip = os.environ.get('RUNPOD_PUBLIC_IP', 'localhost')
+#     pod_port = os.environ.get('RUNPOD_TCP_PORT_8765', '8765')
+    
+#     # 진행 상태 업데이트
+    # runpod.serverless.progress_update(job, {  # job 객체 사용
+    #     "status": "엔진 초기화 중",
+    #     "ip": pod_ip,
+    #     "port": pod_port
+    # })
+
+#     # vLLM 엔진 초기화
+#     if not engine:
+#         try:
+#             engine = vLLMEngine()
+#             runpod.serverless.progress_update(job, {"status": "엔진 준비 완료"})
+#         except Exception as e:
+#             return {"error": f"엔진 오류: {str(e)}"}
+
+#     # WebSocket 서버 설정
+#     if not websocket_server:
+#         websocket_server = WebSocketServer(
+#             engine, 
+#             host="0.0.0.0", 
+#             port=8765
+#         )
+
+#     # 비동기 서버 실행
+#     server_task = asyncio.create_task(websocket_server.start())
+    
+#     # 백그라운드 작업 모니터링
+#     while not server_task.done():
+#         await asyncio.sleep(1)
+#         runpod.serverless.progress_update(job, {
+#             "status": "요청 대기 중",
+#             "connections": len(websocket_server.active_connections),
+#             "ip": pod_ip,
+#             "port": pod_port
+#         })
+
+#     return {"status": "서버 종료"}
+
+# if __name__ == "__main__":
+#     runpod.serverless.start({
+#         "handler": handler,
+#         "concurrency_modes": {
+#             "max_workers": 1  # 단일 워커 설정
+#         }
+#     })
 
 
 # import runpod
