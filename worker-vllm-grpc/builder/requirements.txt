@@ -9,4 +9,5 @@ pydantic
 pydantic-settings
 hf-transfer
 transformers
-websocket
+grpcio
+grpcio-tools

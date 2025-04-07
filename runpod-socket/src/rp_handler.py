@@ -85,6 +85,7 @@ def handler(job):
     print(f"🔌 TCP Port: {tcp_port}")
 
     runpod.serverless.progress_update(job, f"Public IP: {public_ip}, TCP Port: {tcp_port}")
+    
 
     result = start_websocket()
 
