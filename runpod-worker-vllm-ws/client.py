@@ -16,9 +16,23 @@ async def receive_stream(ws_uri):
                 if "error" in data:
                     print(f"\n오류 발생: {data['error']}")
                     break
-                    
+
+
                 if "token" in data:
-                    print(data["token"], end="", flush=True)
+                    try:
+                        print(data["token"]["choices"][0]["tokens"][0], end="", flush=True)
+                    except (KeyError, IndexError):
+                        pass
+                else:
+                    try:
+                        print(data["choices"][0]["tokens"][0], end="", flush=True)
+                    except (KeyError, IndexError):
+                        pass
+  
+                # if "token" in data:
+                #     print(data)
+                #     print("\n")
+                #     print(data["token"], end="", flush=True)
                     
                 if data.get("finished", False):
                     print("\n\n[생성 완료]")
