@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Serverless WebSocket Worker Example 
 
 This WebSocket worker example allows direct communication with a serverless worker without using RunPod’s default REST API. It enables real-time, bidirectional communication between a websocket client and the worker.
@@ -16,4 +17,14 @@ This WebSocket worker example allows direct communication with a serverless work
 
 - After deploying this code, remember to go to Serverless Settings → Docker Configuration → Expose TCP Ports and expose port 8765, or whichever port your WebSocket server is running on.
 - If you choose a different port, ensure that you update the [environment variable name](https://github.com/runpod-workers/worker-websocket/blob/main/rp_handler.py#L53) accordingly, as the exposed port number is appended to the variable name.
+=======
+# RunPod Serverless websocket으로로 vLLM에게서 답변 받아오기 구현
+shldlqj2/runpod-worker-vllm-ws:latest 를 통해서 사용 가능합니다.<br>
+프롬프트와 통신까지 구현되었습니다.<br>
+python ./client.py endpoint API_KEY "Prompt"를 통해서 사용 해 볼 수 있습니다.<br>
+<br>
+<br>
+# 25.04.13 동시접속까지 구현했습니다.<br>
+
+>>>>>>> f2f21825f88adbabec7cb8f8e1c3fba2ae17c6b4
 

@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package runpod;
+
+service RunPodService {
+  rpc Handle (HandleRequest) returns (stream HandleResponse);
+}
+
+message HandleRequest {
+  string prompt = 1;
+  int32 seconds = 2;
+}
+
+message HandleResponse {
+  string result = 1;
+}

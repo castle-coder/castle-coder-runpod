@@ -15,6 +15,16 @@ class WebSocketServer:
         self.host = host
         self.port = port
         self.server = None
+<<<<<<< HEAD
+=======
+        self.active_connections = set()
+        self.generation_task = None
+        self.generation_complete = asyncio.Event()
+        self.connection_complete = asyncio.Event()
+
+    async def start_generation(self, job):
+        """vLLM 생성 작업 시작"""
+>>>>>>> f2f21825f88adbabec7cb8f8e1c3fba2ae17c6b4
         
         self.active_connections = {}
         self.active_tasks = {}
@@ -71,11 +81,15 @@ class WebSocketServer:
                 return
             
             job_input = JobInput(prompt["input"])
+<<<<<<< HEAD
             logger.info(f"JobInput처리완료, 작업id : {job_id}")
+=======
+>>>>>>> f2f21825f88adbabec7cb8f8e1c3fba2ae17c6b4
             results_generator = self.engine.generate(job_input)
             
             #job_id에 해당하는 client에게만 결과 전송해야함
             async for token in results_generator:
+<<<<<<< HEAD
                 for websocket in connected_clients:
                     if websocket in self.active_connections and self.active_connections[websocket] == job_id:
                         try:
@@ -130,6 +144,31 @@ class WebSocketServer:
         self.active_connections[websocket] = None
         job_id = None
             
+=======
+                # 모든 연결된 클라이언트에게 전송
+                for websocket in self.active_connections.copy():
+                    try:
+                        await websocket.send(json.dumps({
+                            "token": token,
+                            "finished": False
+                        }))
+                    except websockets.exceptions.ConnectionClosed:
+                        self.active_connections.remove(websocket)
+            
+            # 완료 신호 전송
+            for websocket in self.active_connections.copy():
+                await websocket.send(json.dumps({"finished": True}))
+                logger.info(f"완료 신호 전송완료")
+            
+        except Exception as e:
+            logger.error(f"생성 오류: {str(e)}")
+            
+
+    async def handle_client(self, websocket):
+        """클라이언트 연결 처리"""
+        self.active_connections.add(websocket)
+        self.connection_complete.set()
+>>>>>>> f2f21825f88adbabec7cb8f8e1c3fba2ae17c6b4
         try:
             # 클라이언트로부터 메시지 대기
             async for message in websocket:
@@ -172,7 +211,11 @@ class WebSocketServer:
                     await websocket.send(json.dumps({
                         "status": "종료"
                     }))
+<<<<<<< HEAD
                     break
+=======
+                    logger.info(f"websocket_server 종료 요청 수신")
+>>>>>>> f2f21825f88adbabec7cb8f8e1c3fba2ae17c6b4
                     
         except websockets.exceptions.ConnectionClosed:
             logger.info(f"클라이언트 연결 종료")
@@ -184,12 +227,18 @@ class WebSocketServer:
             logger.error(f"클라이언트 처리 중 오류: {str(e)}")
             
         finally:
+<<<<<<< HEAD
             if websocket in self.active_connections:
                 job_id = self.active_connections[websocket]
                 del self.active_connections[websocket]
                 self.job_complete_events[job_id].set()
                 asyncio.create_task(self.cleanup_task(job_id))
                 logger.info(f"클라이언트 종료 완료, 남은 연결: {len(self.active_connections)}")    
+=======
+            self.active_connections.remove(websocket)
+            logger.info(f"토큰 생성 완료")
+            await self.shutdown()
+>>>>>>> f2f21825f88adbabec7cb8f8e1c3fba2ae17c6b4
 
     async def start(self):
         """서버 시작"""
@@ -199,12 +248,17 @@ class WebSocketServer:
             self.host,
             self.port
         )
+<<<<<<< HEAD
         self.is_shutting_down = False
         logger.info(f"서버 시작: {self.host}:{self.port}")
+=======
+        logger.info(f"Websocket 서버 시작: {self.host}:{self.port}")
+>>>>>>> f2f21825f88adbabec7cb8f8e1c3fba2ae17c6b4
 
     async def shutdown(self):
         """그레이스풀 종료"""
         logger.info(f"websocket_server 종료 함수 실행")
+<<<<<<< HEAD
         
         for job_id, task in self.active_tasks.copy().items():
             if not task.done():
@@ -227,4 +281,18 @@ class WebSocketServer:
         self.connection_complete.clear()
         self.server_terminate.set()
         logger.info(f"Websocket 서버 종료 완료")
+=======
+        if self.generation_task and not self.generation_task.done():
+            self.generation_task.cancel()
+            try:
+                await self.generation_task
+            except asyncio.CancelledError:
+                pass
+        self.generation_complete.set()
+
+
+        if self.server:
+            self.server.close()
+            await self.server.wait_closed()
+>>>>>>> f2f21825f88adbabec7cb8f8e1c3fba2ae17c6b4
 
