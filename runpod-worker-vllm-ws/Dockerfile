@@ -16,7 +16,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install --upgrade -r /requirements.txt
 
 # vLLM 및 FlashInfer 설치 (WebSocket 지원 버전에 맞게 수정)
-RUN python3 -m pip install vllm==0.8.2 && \
+RUN python3 -m pip install vllm==0.8.3 && \
     python3 -m pip install flashinfer -i https://flashinfer.ai/whl/cu121/torch2.3
 
 # 워커 설정 변수
