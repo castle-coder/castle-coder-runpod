@@ -186,6 +186,7 @@ if __name__ == "__main__":
             
             # API를 통해 얻은 grpc_target으로 스트리밍 실행
             print(f"API로 얻은 gRPC 서버로 연결 시도: {grpc_target}")
+            time.sleep(1) # 잠시 대기 후 스트리밍 시도
             try:
                 asyncio.run(receive_grpc_stream(grpc_target, prompt))
                 streaming_successful = True # 스트리밍 성공
@@ -212,4 +213,7 @@ if __name__ == "__main__":
     elif not streaming_successful and grpc_target: # target은 있었으나 (예: 파일에서 읽었으나 첫 시도 실패 후 API 호출 안함) 실패한 경우
         print(f"gRPC 서버({grpc_target}) 연결 또는 스트리밍에 최종 실패했습니다.")
         sys.exit(1)
+    
+    response = requests.post(f'https://api.runpod.ai/v2/{endpoint_id}/cancel/{request_id}', headers=headers)
+    # 요청 취소를 위한 API 호출
     # 성공적으로 스트리밍이 완료된 경우 (streaming_successful = True) 프로그램은 이미 위에서 sys.exit(0)으로 종료됨

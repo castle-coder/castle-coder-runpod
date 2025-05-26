@@ -125,20 +125,22 @@ async def start_grpc_server(job):
 
 # RunPod 서버리스 핸들러 (예시: gRPC 서버 실행을 보장)
 async def handler(job):
-    print("RunPod 서버리스 핸들러 시작")
     logging.info("RunPod 서버리스 핸들러 시작")
     logging.info("1")
     
     
     # gRPC 서버 시작 (여러 번 호출해도 이미 실행 중이면 영향없도록 구성)
     await start_grpc_server(job)
-    
+    logging.info("gRPC 서버 시작")
     
     # gRPC 서버가 종료될 때까지 기다림
     # RunPodService 내에서 active_clients == 0이 되면 서버가 stop()되고, 이 await가 풀림.
+    global grpc_server
     if grpc_server: # 서버가 성공적으로 시작되었는지 확인
         await grpc_server.wait_for_termination()
+        grpc_server = None  # 서버가 종료되었으므로 None으로 초기화
         logging.info("RunPod 핸들러: gRPC 서버 종료됨.")
+
     else:
         logging.error("RunPod 핸들러: gRPC 서버가 초기화되지 않았거나 시작에 실패했습니다.")
     
