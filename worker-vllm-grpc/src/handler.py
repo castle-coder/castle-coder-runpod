@@ -37,16 +37,27 @@ class RunPodService(service_pb2_grpc.RunPodServiceServicer):
             engine = openai_engine if job_input.openai_route else vllm_engine
             
             result = engine.generate(job_input)
-            # logging.info(1) # 기존 로깅 제거 또는 수정
-            # logging.info(result) # 기존 로깅 제거 또는 수정
-
+            generated_text_parts = []  # 생성된 텍스트만 저장할 리스트
+            
             async for token in result:
+                # 토큰에서 실제 텍스트 추출 (클라이언트와 동일한 방식)
+                try:
+                    actual_text = token.get("choices", [{}])[0].get("tokens", [""])[0]
+                    generated_text_parts.append(actual_text)
+                except (KeyError, IndexError, AttributeError):
+                    # 토큰 구조가 예상과 다를 경우 전체 토큰을 문자열로 변환
+                    generated_text_parts.append(str(token))
+                
                 message = {
                     "token": token,
                     "finished": False
                 }
                 yield service_pb2.HandleResponse(result=json.dumps(message, ensure_ascii=False))
-                
+            
+            # 전체 생성된 텍스트 로깅
+            full_generated_text = "".join(generated_text_parts)
+            logging.info(f"{job_input.request_id}의 답변 완료. 생성된 텍스트: {full_generated_text}")
+
             message = {
                 "finished": True
             }

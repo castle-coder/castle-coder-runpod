@@ -173,7 +173,7 @@ if __name__ == "__main__":
                 print(f"상태 확인 응답 JSON 파싱 실패 ({i+1}/500)")
                 if i == 499:
                     sys.exit(1)
-            time.sleep(2) 
+            time.sleep(1) 
         
         if new_grpc_target_from_api:
             grpc_target = new_grpc_target_from_api
