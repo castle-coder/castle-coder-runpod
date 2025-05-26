@@ -11,6 +11,8 @@ import json
 
 # 전역 변수에 gRPC 서버 인스턴스 저장
 grpc_server = None
+# 활성 클라이언트 수 관리를 위한 Lock
+client_management_lock = asyncio.Lock()
 
 # 모델 엔진 초기화
 vllm_engine = vLLMEngine()
@@ -18,39 +20,76 @@ openai_engine = OpenAIvLLMEngine(vllm_engine)
 
 # gRPC 서비스 구현 (비동기 스트리밍)
 class RunPodService(service_pb2_grpc.RunPodServiceServicer):
+    active_clients = 0 # 클래스 변수로 활성 클라이언트 수 추적
+
     def __init__(self, job):
         self.job = job
+        
     async def Handle(self, request, context):
-        logging.info(f"gRPC 연결 성립, prompt: {request.prompt}")
-        # 요청에 기반해 JobInput 생성
-        job_input = JobInput(self.job["input"])
-        engine = openai_engine if job_input.openai_route else vllm_engine
+        async with client_management_lock:
+            RunPodService.active_clients += 1
+        logging.info(f"gRPC 클라이언트 연결됨. 현재 활성 클라이언트: {RunPodService.active_clients}, prompt: {request.prompt}")
         
-        result = engine.generate(job_input)
-        logging.info(1)
-        logging.info(result)
-        # 모델로부터 스트리밍 응답 생성 (예: async generator)
-        async for token in result:
-            logging.info(f"➡️ 스트리밍 중: {token}")
-            message = {
-                "token": token,
-                "finished": False
-            }
-            logging.info("📤 gRPC 토큰 전송: %s", token)
-
-            yield service_pb2.HandleResponse(result=json.dumps(message, ensure_ascii=False))
+        try:
+            job_prompt_str = request.prompt # 문자열로 받음
+            job_prompt_dict = json.loads(job_prompt_str) # JSON 문자열을 딕셔너리로 파싱
+            job_input = JobInput(job_prompt_dict["input"]) # 파싱된 딕셔너리 사용
+            engine = openai_engine if job_input.openai_route else vllm_engine
             
-        message = {
-            "finished": True
-        }
-        logging.info("📤 gRPC 종료 신호 전송")
-        yield service_pb2.HandleResponse(result=json.dumps(message, ensure_ascii=False))
-        
+            result = engine.generate(job_input)
+            # logging.info(1) # 기존 로깅 제거 또는 수정
+            # logging.info(result) # 기존 로깅 제거 또는 수정
 
+            async for token in result:
+                message = {
+                    "token": token,
+                    "finished": False
+                }
+                yield service_pb2.HandleResponse(result=json.dumps(message, ensure_ascii=False))
+                
+            message = {
+                "finished": True
+            }
+            logging.info("📤 gRPC 종료 신호 전송")
+            yield service_pb2.HandleResponse(result=json.dumps(message, ensure_ascii=False))
+
+        except grpc.aio.AioRpcError as e:
+            logging.error(f"gRPC 스트리밍 중 오류 발생: {e.code()}", exc_info=True)
+            # 클라이언트가 갑자기 연결을 끊는 경우 (CANCELLED, UNAVAILABLE 등)
+            if e.code() == grpc.StatusCode.CANCELLED or e.code() == grpc.StatusCode.UNAVAILABLE:
+                logging.info(f"클라이언트 연결 비정상 종료 감지: {e.code()}")
+        except Exception as e:
+            logging.error(f"Handle 메서드 내 일반 오류: {e}", exc_info=True)
+            error_message = {
+                "error": str(e),
+                "finished": True 
+            }
+            try:
+                yield service_pb2.HandleResponse(result=json.dumps(error_message, ensure_ascii=False))
+            except Exception as yield_e:
+                logging.error(f"오류 메시지 전송 실패: {yield_e}", exc_info=True)
+        finally:
+            async with client_management_lock:
+                RunPodService.active_clients -= 1
+                current_active_clients = RunPodService.active_clients
+            logging.info(f"gRPC 클라이언트 연결 종료. 현재 활성 클라이언트: {current_active_clients}")
+            
+            if current_active_clients == 0:
+                global grpc_server
+                if grpc_server:
+                    logging.info("✅ 모든 클라이언트 연결 종료됨 → gRPC 서버 종료 예약")
+                    asyncio.create_task(self.schedule_server_stop())
+
+    async def schedule_server_stop(self):
+        await asyncio.sleep(0.5) 
         global grpc_server
-        if grpc_server:
-            logging.info("✅ 스트리밍 완료 → gRPC 서버 종료")
-            await grpc_server.stop(grace=1)
+        async with client_management_lock: # Lock을 사용하여 active_clients 접근 동기화
+            if grpc_server and RunPodService.active_clients == 0:
+                logging.info("✅ 예약된 gRPC 서버 종료 실행")
+                await grpc_server.stop(grace=1) 
+            elif grpc_server and RunPodService.active_clients > 0:
+                logging.info(f"ℹ️ 서버 종료 예약되었으나, 새 클라이언트({RunPodService.active_clients}명)가 연결되어 종료 취소.")
+
 
 # gRPC 서버 시작 함수 (비동기)
 async def start_grpc_server(job):
@@ -70,8 +109,8 @@ async def start_grpc_server(job):
     })
     
     await grpc_server.start()
-    # 서버는 백그라운드에서 실행 (서버 종료는 Handle 메서드 내에서 진행)
-    asyncio.create_task(grpc_server.wait_for_termination())
+    # 서버는 백그라운드에서 실행 (서버 종료는 Handle 메서드 내 조건 또는 핸들러 종료 시 처리)
+    # handler 함수에서 wait_for_termination을 호출하므로 여기서는 create_task 불필요.
 
 # RunPod 서버리스 핸들러 (예시: gRPC 서버 실행을 보장)
 async def handler(job):
@@ -79,12 +118,21 @@ async def handler(job):
     logging.info("RunPod 서버리스 핸들러 시작")
     logging.info("1")
     
+    
     # gRPC 서버 시작 (여러 번 호출해도 이미 실행 중이면 영향없도록 구성)
     await start_grpc_server(job)
     
-    # gRPC 서버가 종료될 때까지 기다림
-    await grpc_server.wait_for_termination()
     
+    # gRPC 서버가 종료될 때까지 기다림
+    # RunPodService 내에서 active_clients == 0이 되면 서버가 stop()되고, 이 await가 풀림.
+    if grpc_server: # 서버가 성공적으로 시작되었는지 확인
+        await grpc_server.wait_for_termination()
+        logging.info("RunPod 핸들러: gRPC 서버 종료됨.")
+    else:
+        logging.error("RunPod 핸들러: gRPC 서버가 초기화되지 않았거나 시작에 실패했습니다.")
+    
+    logging.info("RunPod 서버리스 핸들러 종료")
+
 
 # RunPod 서버리스 시작
 runpod.serverless.start(
