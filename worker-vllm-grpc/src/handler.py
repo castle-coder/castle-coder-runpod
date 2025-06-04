@@ -9,10 +9,17 @@ from utils import JobInput
 from engine import vLLMEngine, OpenAIvLLMEngine
 import json
 
+# 연결 제한 설정
+MAX_CONCURRENT_CONNECTIONS = 20
+
 # 전역 변수에 gRPC 서버 인스턴스 저장
 grpc_server = None
 # 활성 클라이언트 수 관리를 위한 Lock
 client_management_lock = asyncio.Lock()
+# 5분 타이머 관리를 위한 변수들
+startup_timeout_task = None
+first_connection_received = False
+startup_timeout_lock = asyncio.Lock()
 
 # 모델 엔진 초기화
 vllm_engine = vLLMEngine()
@@ -26,9 +33,29 @@ class RunPodService(service_pb2_grpc.RunPodServiceServicer):
         self.job = job
         
     async def Handle(self, request, context):
+        global first_connection_received, startup_timeout_task
+        
+        # 연결 수 제한 확인
         async with client_management_lock:
+            if RunPodService.active_clients >= MAX_CONCURRENT_CONNECTIONS:
+                error_msg = f"최대 동시 연결 수({MAX_CONCURRENT_CONNECTIONS})에 도달했습니다. 현재 활성 연결: {RunPodService.active_clients}"
+                logging.warning(f"🚫 연결 거절: {error_msg}")
+                await context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, error_msg)
+                return
+            
+            # 연결 허용 - 활성 클라이언트 수 증가
             RunPodService.active_clients += 1
-        logging.info(f"gRPC 클라이언트 연결됨. 현재 활성 클라이언트: {RunPodService.active_clients}, prompt: {request.prompt}")
+            current_active_clients = RunPodService.active_clients
+        
+        logging.info(f"✅ gRPC 클라이언트 연결 수락. 현재 활성 클라이언트: {current_active_clients}/{MAX_CONCURRENT_CONNECTIONS}, prompt: {request.prompt}")
+        
+        # 첫 번째 연결 시 5분 타이머 취소
+        async with startup_timeout_lock:
+            if not first_connection_received:
+                first_connection_received = True
+                if startup_timeout_task and not startup_timeout_task.done():
+                    startup_timeout_task.cancel()
+                    logging.info("🎯 첫 번째 클라이언트 연결 감지 → 5분 타임아웃 타이머 취소")
         
         try:
             job_prompt_str = request.prompt # 문자열로 받음
@@ -83,7 +110,7 @@ class RunPodService(service_pb2_grpc.RunPodServiceServicer):
             async with client_management_lock:
                 RunPodService.active_clients -= 1
                 current_active_clients = RunPodService.active_clients
-            logging.info(f"gRPC 클라이언트 연결 종료. 현재 활성 클라이언트: {current_active_clients}")
+            logging.info(f"📤 gRPC 클라이언트 연결 종료. 현재 활성 클라이언트: {current_active_clients}/{MAX_CONCURRENT_CONNECTIONS}")
             
             if current_active_clients == 0:
                 global grpc_server
@@ -92,34 +119,60 @@ class RunPodService(service_pb2_grpc.RunPodServiceServicer):
                     asyncio.create_task(self.schedule_server_stop())
 
     async def schedule_server_stop(self):
-        await asyncio.sleep(0.5) 
+        await asyncio.sleep(0.5)
         global grpc_server
         async with client_management_lock: # Lock을 사용하여 active_clients 접근 동기화
             if grpc_server and RunPodService.active_clients == 0:
                 logging.info("✅ 예약된 gRPC 서버 종료 실행")
-                await grpc_server.stop(grace=1) 
+                await grpc_server.stop(grace=1)
             elif grpc_server and RunPodService.active_clients > 0:
                 logging.info(f"ℹ️ 서버 종료 예약되었으나, 새 클라이언트({RunPodService.active_clients}명)가 연결되어 종료 취소.")
 
 
+# 5분 타임아웃 핸들러 함수
+async def startup_timeout_handler():
+    """서버 시작 후 5분 내에 첫 연결이 없으면 서버 종료"""
+    global grpc_server, first_connection_received
+    
+    try:
+        await asyncio.sleep(300)  # 300초 대기
+        
+        async with startup_timeout_lock:
+            if not first_connection_received:
+                logging.warning("⚠️ 서버 시작 후 5분 내에 클라이언트 연결이 없어 서버를 종료합니다")
+                if grpc_server:
+                    await grpc_server.stop(grace=1)
+                    logging.info("🔴 5분 타임아웃으로 인한 gRPC 서버 종료 완료")
+            else:
+                logging.info("ℹ️ 5분 타임아웃 체크: 이미 클라이언트 연결이 있어 서버 유지")
+                
+    except asyncio.CancelledError:
+        logging.info("ℹ️ 5분 타임아웃 타이머가 취소되었습니다 (첫 연결 감지됨)")
+        raise
+
+
 # gRPC 서버 시작 함수 (비동기)
 async def start_grpc_server(job):
-    global grpc_server
+    global grpc_server, startup_timeout_task, first_connection_received
+    
+    # 타이머 관련 변수 초기화
+    first_connection_received = False
+    
     grpc_server = grpc.aio.server()
     service_pb2_grpc.add_RunPodServiceServicer_to_server(RunPodService(job), grpc_server)
-    public_ip = os.environ.get('RUNPOD_PUBLIC_IP', 'localhost')
-    tcp_port = os.environ.get('RUNPOD_TCP_PORT_50051', '50051')
+    
     listen_addr = f"0.0.0.0:50051"
     grpc_server.add_insecure_port(listen_addr)
-    logging.info(f"gRPC 서버 시작: {listen_addr}")
+    logging.info(f"🚀 gRPC 서버 시작: {listen_addr}")
+    logging.info(f"🔒 최대 동시 연결 수 제한: {MAX_CONCURRENT_CONNECTIONS}개")
 
-    runpod.serverless.progress_update(job, {
-        "status": "start",
-        "ip": public_ip,
-        "port": tcp_port
-    })
     
     await grpc_server.start()
+    
+    # 5분 타임아웃 타이머 시작
+    startup_timeout_task = asyncio.create_task(startup_timeout_handler())
+    logging.info("⏰ 5분 타임아웃 타이머 시작 - 첫 연결이 없으면 서버가 자동 종료됩니다")
+    
     # 서버는 백그라운드에서 실행 (서버 종료는 Handle 메서드 내 조건 또는 핸들러 종료 시 처리)
     # handler 함수에서 wait_for_termination을 호출하므로 여기서는 create_task 불필요.
 
@@ -132,12 +185,31 @@ async def handler(job):
     # gRPC 서버 시작 (여러 번 호출해도 이미 실행 중이면 영향없도록 구성)
     await start_grpc_server(job)
     logging.info("gRPC 서버 시작")
+    await asyncio.sleep(0.5)  # 서버 시작 대기 (필요시 조정 가능)
+
+    public_ip = os.environ.get('RUNPOD_PUBLIC_IP', 'localhost')
+    tcp_port = os.environ.get('RUNPOD_TCP_PORT_50051', '50051')
+    runpod.serverless.progress_update(job, {
+        "status": "start",
+        "ip": public_ip,
+        "port": tcp_port
+    })
     
     # gRPC 서버가 종료될 때까지 기다림
     # RunPodService 내에서 active_clients == 0이 되면 서버가 stop()되고, 이 await가 풀림.
-    global grpc_server
+    global grpc_server, startup_timeout_task
     if grpc_server: # 서버가 성공적으로 시작되었는지 확인
         await grpc_server.wait_for_termination()
+        
+        # 서버 종료 시 타임아웃 태스크도 정리
+        if startup_timeout_task and not startup_timeout_task.done():
+            startup_timeout_task.cancel()
+            try:
+                await startup_timeout_task
+            except asyncio.CancelledError:
+                pass
+            logging.info("🧹 5분 타임아웃 태스크 정리 완료")
+        
         grpc_server = None  # 서버가 종료되었으므로 None으로 초기화
         logging.info("RunPod 핸들러: gRPC 서버 종료됨.")
 
@@ -151,7 +223,7 @@ async def handler(job):
 runpod.serverless.start(
     {
         "handler": handler,
-        "concurrency_modifier": lambda x: vllm_engine.max_concurrency,
+        "concurrency_modifier": lambda x: 1,
         "return_aggregate_stream": True,
     }
 )
